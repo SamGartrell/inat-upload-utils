@@ -14,7 +14,14 @@ from typing import Tuple
 
 
 def parse_tz(tz: str) -> int:
-    """Parse the tz component of a timezone string and return the offset."""
+    """Parse the tz component of a timezone string and return the offset.
+
+    Args:
+        tz (str): The timezone string.
+
+    Returns:
+        int: The offset in hours.
+    """
     is_negative = False
     if tz.startswith("-"):
         is_negative = True
@@ -71,7 +78,14 @@ def find_closest_waypoint(
     waypoint_fmt="%Y:%m:%d %H:%M:%S",
     target_fmt="%Y:%m:%d %H:%M:%S",
 ):
-    """Find the waypoint with the timestamp closest to the target timestamp."""
+    """Find the waypoint with the timestamp closest to the target timestamp.
+    Args:
+        lat (float): latitude
+        lon (float): longitude
+
+    Returns:
+        dict: dictionary like {"t": "2021-12-24 12:00:00", "x": -122.123, "y": 45.123, delta: timedelta}
+    """
     time_difs = {}
 
     wp_copy = waypoints.copy()
@@ -132,6 +146,30 @@ def truncate(f: float, n: int = 0) -> float:
     return math.floor(f * 10**n) / 10**n
 
 
+def get_reference_direction(lat: float, lon: float) -> dict:
+    """returns the cardinal diurection to be used as a reference when interopreting DMS values as decimals.
+
+    Args:
+        lat (float): latitude
+        lon (float): longitude
+
+    Returns:
+        dict: dictionary with keys 'lat' and 'lon' and values 'N', 'S', 'E', or 'W'
+    """
+
+    if lat >= 0:
+        lat_ref = "N"
+    elif lat < 0:
+        lat_ref = "S"
+
+    if lon >= 0:
+        lon_ref = "E"
+    elif lon < 0:
+        lon_ref = "W"
+
+    return {"lat": lat_ref, "lon": lon_ref}
+
+
 def get_dms_from_decimal(decimal: float) -> Tuple[float, float, float]:
     # ref: https://github.com/python-pillow/Pillow/issues/6657
     """
@@ -139,10 +177,12 @@ def get_dms_from_decimal(decimal: float) -> Tuple[float, float, float]:
     :param decimal: to be converted
     :return:
     """
+    # NOTE: need to derive reference?
     degrees = truncate(decimal, 0)
     minutes_whole = (decimal - degrees) * 60
     minutes = truncate(minutes_whole, 0)
     seconds = (minutes_whole - minutes) * 60
+    print(f"degrees: {degrees}, minutes: {minutes}, seconds: {seconds}")
     return degrees, minutes, seconds
 
 
@@ -163,6 +203,9 @@ def get_decimal_from_dms(dms: Tuple[float, float, float], ref: str = "N") -> flo
         minutes = -minutes
         seconds = -seconds
 
+    print(
+        f"degrees: {degrees}, minutes: {minutes}, seconds: {seconds}, reference: {ref}"
+    )
     return degrees + minutes + seconds
 
 
@@ -172,7 +215,7 @@ def get_XYZ(photo_name: str, directory: str = None) -> Tuple[float, float, float
     """
     Read gps EXIF information form image
     :param image_path: from which EXIF should be read
-    :return: (lat, lng, alt) tuple
+    :return: (lat, lon, alt) tuple
     """
     # ref: https://github.com/python-pillow/Pillow/issues/6657
     if not directory:
@@ -194,16 +237,17 @@ def get_XYZ(photo_name: str, directory: str = None) -> Tuple[float, float, float
     gps_longitude_ref = gps_exif.get("GPSLongitudeRef") or "E"
 
     lat = get_decimal_from_dms(gps_latitude, gps_latitude_ref)
-    lng = get_decimal_from_dms(gps_longitude, gps_longitude_ref)
+    lon = get_decimal_from_dms(gps_longitude, gps_longitude_ref)
     alt = gps_exif.get("GPSAltitude") or 0
 
-    return lat, lng, alt
+    return lat, lon, alt
 
 
-def write_XY(
+def write_XYZ(
     photo_name: str,
-    lng: float,
+    lon: float,
     lat: float,
+    ref: dict,
     alt: float = 0.0,
     camera_manufacturer: str = "Canon",
     camera: str = "T5EOS M100",
@@ -211,19 +255,23 @@ def write_XY(
     out_directory: str = None,
     out_fmt="JPEG",
 ) -> Tuple:
+    """Write GPS EXIF information to an image.
+
+    Args:
+        photo_name (str): The name of the photo.
+        lon (float): The longitude.
+        lat (float): The latitude.
+        ref (dict): A dictionary with keys "lat" and "lon" for latitude and longitude references.
+        alt (float, optional): The altitude. Defaults to 0.0.
+        camera_manufacturer (str, optional): The manufacturer of the camera. Defaults to "Canon".
+        camera (str, optional): The camera used. Defaults to "T5EOS M100".
+        in_directory (str, optional): The input directory. Defaults to None.
+        out_directory (str, optional): The output directory. Defaults to None.
+        out_fmt (str, optional): The output format. Defaults to "JPEG".
+
+    Returns:
+        Tuple: The result of the operation.
     """
-    Method for writing GPS exif information to an image
-    :param image_path: to which exif should be added
-    :param lng: longitude
-    :param lat: latitude
-    :param alt: altitude
-    :param camera_manufacturer: Manufacturer of the camera
-    :param camera: Camera used
-    :out_fmt: output format (see format parameter in PIL.Image.Save())
-    :return: None
-    """
-    # ref: https://github.com/python-pillow/Pillow/issues/6657
-    # ref: https://exiftool.org/TagNames/GPS.html
     if not in_directory:
         directory = os.path.join(os.getcwd(), "in_photos")
     if not out_directory:
@@ -233,19 +281,16 @@ def write_XY(
     image = Image.open(image_path)
 
     exif = image.getexif()
-    # TODO: edit tag manipulations according to second ref
-    # TODO: consider using exiftool to get a better idea of what tags to use
-    # TODO: consider capturing snapshot of exif data before and after writing to compare, as per https://en.wikipedia.org/wiki/Exif#cite_note-14
     gps_value = {
-        0: b"\x02\x03\x00\x00",
-        1: "N",
-        2: get_dms_from_decimal(lat),
-        3: "E",
-        4: get_dms_from_decimal(lng),
-        5: b"\x00",
-        6: alt,
-        9: "A",
-        18: "WGS-84\x00",
+        0: b"\x02\x03\x00\x00",  # GPSVersionID
+        1: ref["lat"],  # GPSLatitudeRef
+        2: get_dms_from_decimal(lat),  # GPSLatitude
+        3: ref["lon"],  # GPSLongitudeRef
+        4: get_dms_from_decimal(lon),  # GPSLongitude
+        5: b"\x00",  # GPSAltitudeRef
+        6: alt,  # GPSAltitude
+        9: "A",  # GPSStatus
+        18: "WGS-84\x00",  # GPSMapDatum
     }
 
     exif[34853] = gps_value
@@ -313,6 +358,7 @@ def get_exif_timestamp(
 def modify_exif_position(
     photo_name: str,
     waypoint: dict,
+    ref: dict,
     in_directory: str = None,
     out_directory: str = None,
     camera_manufacturer: str = "Canon",
@@ -326,13 +372,14 @@ def modify_exif_position(
 
     lat = waypoint.get("y", 0)
     lon = waypoint.get("x", 0)
-    alt = waypoint.get("z", 0)
+    alt = waypoint.get("z", 1)
 
-    out_photo = write_XY(
+    out_photo = write_XYZ(
         photo_name,
-        lon,
-        lat,
-        alt,
+        lon=lon,
+        lat=lat,
+        ref=ref,
+        alt=alt,
         in_directory=in_directory,
         out_directory=out_directory,
     )
@@ -351,23 +398,23 @@ def modify_exif_position(
 # Example usage
 
 # region example
-gpx_file = "gpx/hood_241225.gpx"
-print(f"GPX file: {gpx_file}\ngetting waypoints...")
-waypoints = parse_gpx(gpx_file)
-# print(f"waypoints: {waypoints}")
+# gpx_file = "gpx/hood_241225.gpx"
+# print(f"GPX file: {gpx_file}\ngetting waypoints...")
+# waypoints = parse_gpx(gpx_file)
+# # print(f"waypoints: {waypoints}")
 
-print(f"photo funcs")
-for photo in list_photo_names():
-    ts = get_exif_timestamp(photo, offset=-8)  # -8 for PST
-    georef = find_closest_waypoint(waypoints, ts)
-    print(f"Photo: {photo},\nTimestamp: {ts}\nClosest Waypoint: {georef}")
-    print()
+# print(f"photo funcs")
+# for photo in list_photo_names():
+#     ts = get_exif_timestamp(photo, offset=-8)  # -8 for PST
+#     georef = find_closest_waypoint(waypoints, ts)
+#     print(f"Photo: {photo},\nTimestamp: {ts}\nClosest Waypoint: {georef}")
+#     print()
 
-    print("modifying exif data...")
-    photo = modify_exif_position(photo, georef)
-    print("modification complete")
-    print(f"image written to {photo[1]}")
-    photo[0].show()
+#     print("modifying exif data...")
+#     photo = modify_exif_position(photo, ref=georef)
+#     print("modification complete")
+#     print(f"image written to {photo[1]}")
+#     photo[0].show()
 
 
-# endregion example
+# # endregion example
