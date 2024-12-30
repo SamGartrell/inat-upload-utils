@@ -157,7 +157,7 @@ dmypy.json
 # pytype static type analyzer
 .pytype/
 
-# Cython debug symbols
+# Cython debug symbols'
 cython_debug/
 
 # PyCharm
@@ -177,3 +177,7 @@ cython_debug/
 
 in_photos/*
 .in_photos/
+
+# vscode
+launch.json
+testing.py
