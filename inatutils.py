@@ -5,22 +5,25 @@ import sys
 
 
 class InatUtils:
-    def __init__(self, token=None, photo_dir=None, gpx_dir=None):
+
+    def __init__(
+        self, token=None, photo_dir=None, gpx_dir=None, output_dir=None, timezone=None
+    ):
         self.photos = ()
         self.georeferenced = 0.0
         self.mean_accuracy = 0.0
         self.time_range = None
         self.bbox = None
-        self.photo_dir = None
-        self.gpx_dir = None
-        self._token = None
+        self.photo_dir = photo_dir
+        self.gpx_dir = gpx_dir
+        self.output_dir = output_dir
+        self._token = token
+        self.timezone = timezone
 
         if photo_dir:
-            self.photo_dir = photo_dir
             self.load(photo_dir=photo_dir)
 
         if gpx_dir:
-            self.gpx_dir = gpx_dir
             self.georeference(gpx_dir=gpx_dir)
 
         if token:
