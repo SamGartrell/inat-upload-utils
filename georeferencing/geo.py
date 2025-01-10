@@ -321,6 +321,8 @@ def get_exif_timestamp(
     offset: int = None,
 ):
     """Gets the timestamp from the EXIF data of an image."""
+
+    timestamp = None
     if not directory:
         directory = os.path.join(os.getcwd(), "in_photos")
     try:
@@ -336,6 +338,11 @@ def get_exif_timestamp(
                         print(f"image {photo_name} was taken at {value}")
                         timestamp = value
                         break
+            else:
+                print(
+                    f"No exif data found for {photo_name}!!\n\tHINT: iOS users should use google photos to upload images in order to preserve metadata: https://support.google.com/photos/thread/12597272/heic-being-downloaded-as-jpg-loses-all-meta-data?hl=en"
+                )
+                return None
         if timestamp:
             if as_utc:
                 print("converting timestamp to UTC")
@@ -349,6 +356,11 @@ def get_exif_timestamp(
                 return timestamp
             else:
                 return datetime.strptime(timestamp, "%Y:%m:%d %H:%M:%S")
+        else:
+            print(
+                f"No timestamp found in exif data for {photo_name}!!\n\tHINT: iOS users should use google photos to upload images in order to preserve metadata: https://support.google.com/photos/thread/12597272/heic-being-downloaded-as-jpg-loses-all-meta-data?hl=en"
+            )
+            return None
 
     except Exception as e:
         print(f"Error: {e}")
@@ -374,12 +386,17 @@ def modify_exif_position(
     lon = waypoint.get("x", 0)
     alt = waypoint.get("z", 1)
 
+    # FIXME: test eliminating reference direction parameter... ref = get_reference_direction(lat=lat, lon=lon)
     out_photo = write_XYZ(
         photo_name,
-        lon=lon,
-        lat=lat,
+        lon=abs(
+            lon
+        ),  # since now we are denoting "south"/"west" with the ref, not negatives
+        lat=abs(
+            lat
+        ),  # since now we are denoting "south"/"west" with the ref, not negatives
         ref=ref,
-        alt=alt,
+        alt=alt,  # FIXME: add altitude reference
         in_directory=in_directory,
         out_directory=out_directory,
     )
@@ -398,7 +415,7 @@ def modify_exif_position(
 # Example usage
 
 # region example
-# gpx_file = "gpx/hood_241225.gpx"
+# gpx_file = "../in_gpx/hood_241225.gpx"
 # print(f"GPX file: {gpx_file}\ngetting waypoints...")
 # waypoints = parse_gpx(gpx_file)
 # # print(f"waypoints: {waypoints}")

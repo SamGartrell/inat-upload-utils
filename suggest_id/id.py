@@ -30,16 +30,21 @@ def refresh_token(
     return manual_token
 
 
-def get_cv_ids(image_path):
-    # assemble payload with jpeg bytes like
-    # -----------------------------110819625921283343413685461672
-    # Content-Disposition: form-data; name="image"; filename="blob"
-    # Content-Type: image/jpeg
-    # <jpeg bytes>
-    # -----------------------------110819625921283343413685461672--
+def get_cv_ids(image_path, token=None):
+    """sends an image to the computer vision model, returns the response json
+
+    Args:
+        image_path (str): the location of the image.
+        token (str, optional): a token for the API. Defaults to None.
+
+    Returns:
+        _type_: _description_
+    """
+    if not token:
+        token = refresh_token()
     with open(image_path, "rb") as image_file:
         files = {"image": image_file}
-        headers = {"Authorization": refresh_token()}
+        headers = {"Authorization": token}
         res = requests.post(
             "https://api.inaturalist.org/v1/computervision/score_image",
             files=files,
@@ -47,21 +52,6 @@ def get_cv_ids(image_path):
         )
     print(json.loads(res.text))
     return json.loads(res.text)
-
-
-def get_identification(cv_result: object) -> str:
-    """returns the most appropriate identification from the computer vision result
-
-    Args:
-        cv_result (object): an object returned by requests to the iNaturalist computer vision API
-
-    Returns:
-        str: the identification (inconsistent taxonomic rank)
-    """
-    # if not common ancestor, find that with a new API request
-    if False:
-        return d
-    return None
 
 
 res = get_cv_ids(
@@ -75,7 +65,7 @@ def interpret_results(res: object, confidence_threshold: int = 75):
         and isinstance(res.get("results"), list)
         and len(res.get("results")) > 0
     ):
-        # if there's a sufficient score, return that suggestion
+        # if there's a sufficient score, return that suggestion; IDs sorted by best-worst score
         results = res.get("results")
         if results[0].get("combined_score") > confidence_threshold:
             score = results[0].get("combined_score")
@@ -92,10 +82,5 @@ def interpret_results(res: object, confidence_threshold: int = 75):
                 f"no acceptable ID found; resorting to common ancestor:\n\trank: {res.get('common_ancestor').get('rank')}\n\tname: {res.get('common_ancestor').get('name')}"
             )
             return res.get("common_ancestor").get("name")
-    # else, return None
+    # else,
     return None
-
-
-interpret_results(res)
-
-print()
