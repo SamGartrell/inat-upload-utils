@@ -177,6 +177,7 @@ cython_debug/
 
 in_photos/*
 .in_photos/
+out_photos/*
 
 # vscode
 launch.json
