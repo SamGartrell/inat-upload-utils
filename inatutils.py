@@ -18,16 +18,19 @@ class InatUtils:
     # region props
     def __init__(
         self,
-        photo_dir: str = None,
-        gpx_dir: str = None,
-        output_dir: str = None,
+        photo_dir: str = "in_photos",
+        gpx_dir: str = "in_gpx",
+        output_dir: str = "out_photos",
         gmt_offset: int = -8,
         token: str = None,
         trusted_genera: list = [],
-        log_level=logging.INFO,
+        log_level="INFO",
         min_score: int | float = 75,
+        common_ancestor_ok: bool = True,
     ):
-        self.in_photos = []
+        self.in_photos = (
+            []
+        )  # TODO: how should I organize this? in, geo, id, out? store all process data in original pohoto obj as source of truth?
         self.out_photos = []
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
@@ -35,6 +38,7 @@ class InatUtils:
         self.time_range = None
         self.bbox = None
         self.trusted_genera = trusted_genera
+        self.common_ancestor_ok = common_ancestor_ok
         self.min_score = min_score
         self.photo_dir = photo_dir
         self.gpx_dir = gpx_dir
@@ -57,11 +61,11 @@ class InatUtils:
                 self.bbox = self._get_bbox()
 
         if token:
-            self._token = token
+            self.token = token
         else:
-            self._token = id.refresh_token()
+            self.token = id.refresh_token()
 
-    # region image class
+    # region image
     class Image:
         def __init__(self, path: str, offset: int):
             self.id = str(uuid.uuid4())
@@ -147,13 +151,15 @@ class InatUtils:
                 output.georeferenced = True
                 output.geo = p.geo
                 output.src = p.id
+                output.georeferenced = True
                 p.outputs.append(output)
                 p.georeferenced = True
                 self.out_photos.append(output)
             except Exception as e:
                 logging.error(e)
         self.georeferenced_percent = (
-            sum(1 for p in self.in_photos if p.georeferenced) / len(self.in_photos)
+            100
+            * (sum(1 for p in self.in_photos if p.georeferenced) / len(self.in_photos))
             if self.in_photos
             else 0.0
         )
@@ -167,10 +173,24 @@ class InatUtils:
             min_score = self.min_score
         for p in self.in_photos:
             res = id.get_cv_ids(p.path, token=self.token)
-            identification = id.interpret_results(res, confidence_threshold=min_score)
+            identification = id.interpret_results(
+                res,
+                confidence_threshold=min_score,
+                common_ancestor_ok=self.common_ancestor_ok,
+            )
+            if identification:
+                p.identity = identification
+                p.identified = True
+                if p.outputs:  # if has child images, they're also IDd now
+                    for o in p.outputs:
+                        o.identity = identification
+                        o.identified = True
 
-            p.identity = identification
-
+        self.identified_percent = (
+            100 * sum(1 for p in self.in_photos if p.identified) / len(self.in_photos)
+            if self.in_photos
+            else 0.0
+        )
     # region exports/uploads
     def dump_jpg(self):
         # Implementation for dumping photos as JPG
@@ -178,10 +198,6 @@ class InatUtils:
 
     def dump_csv(self):
         # Implementation for dumping data to CSV
-        pass
-
-    def _get_token(self, appId):
-        # todo: employ oauthlib after attaining inat app registration
         pass
 
     def _get_bbox(self):
@@ -193,9 +209,9 @@ class InatUtils:
 
         # return ((min_lon, min_lat), (max_lon, max_lat))
 
-
-iu = InatUtils(photo_dir="in_photos", gpx_dir="in_gpx", log_level=logging.DEBUG)
-
-print()
+# For debugging
+# iu = InatUtils(log_level="DEBUG")
+# iu.identify()
+# print()
 
 # %%

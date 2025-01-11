@@ -4,7 +4,7 @@ import logging
 logging.basicConfig(
     format="%(levelname)s:%(module)s:%(funcName)s:%(lineno)d:%(message)s"
 )
-logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().setLevel("INFO")
 
 gpx_file = "in_gpx/hood_241225.gpx"
 logging.debug(f"GPX file: {gpx_file}\ngetting waypoints...")
@@ -14,7 +14,7 @@ logging.debug("waypoints retrieved")
 for photo in list_photo_names():
 
     # get timestamp from exif data
-    logging.debu("getting timestamp from exif data...")
+    logging.debug("getting timestamp from exif data...")
     ts = get_exif_timestamp(photo, offset=-8)  # -8 for PST
     if ts:
         logging.debug("timestamp retrieved; georeferencing...")

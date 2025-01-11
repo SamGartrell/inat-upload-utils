@@ -7,7 +7,7 @@ photo_dir = os.path.join(os.getcwd(), "in_photos")
 logging.basicConfig(
     format="%(levelname)s:%(module)s:%(funcName)s:%(lineno)d:%(message)s"
 )
-logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().setLevel("INFO")
 
 for photo in os.listdir(photo_dir):
     logging.info(f"identifying {photo}...")

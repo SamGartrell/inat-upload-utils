@@ -170,15 +170,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# images
-.cr2
-.png
-.jpg
-
-in_photos/*
-.in_photos/
-out_photos/*
-
 # vscode
 launch.json
 testing.py
