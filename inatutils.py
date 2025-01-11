@@ -18,23 +18,24 @@ class InatUtils:
     # region props
     def __init__(
         self,
-        photo_dir=None,
-        gpx_dir=None,
-        output_dir=None,
+        photo_dir: str = None,
+        gpx_dir: str = None,
+        output_dir: str = None,
         gmt_offset: int = -8,
-        token=None,
-        trusted_genera=[],
+        token: str = None,
+        trusted_genera: list = [],
         log_level=logging.INFO,
+        min_score: int | float = 75,
     ):
         self.in_photos = []
         self.out_photos = []
-        self.trusted_genera = trusted_genera
-        self.min_score = 60
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
-        self.time_range = None
         self.waypoints = []  # TODO: refactor waypoints to be numpy array
+        self.time_range = None
         self.bbox = None
+        self.trusted_genera = trusted_genera
+        self.min_score = min_score
         self.photo_dir = photo_dir
         self.gpx_dir = gpx_dir
         self.output_dir = output_dir
@@ -165,7 +166,7 @@ class InatUtils:
         if not min_score:
             min_score = self.min_score
         for p in self.in_photos:
-            res = id.get_cv_ids(p.path, token=self._token)
+            res = id.get_cv_ids(p.path, token=self.token)
             identification = id.interpret_results(res, confidence_threshold=min_score)
 
             p.identity = identification
@@ -193,7 +194,7 @@ class InatUtils:
         # return ((min_lon, min_lat), (max_lon, max_lat))
 
 
-iu = InatUtils(photo_dir="in_photos", gpx_dir="in_gpx")
+iu = InatUtils(photo_dir="in_photos", gpx_dir="in_gpx", log_level=logging.DEBUG)
 
 print()
 
