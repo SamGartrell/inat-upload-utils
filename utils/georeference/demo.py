@@ -14,7 +14,7 @@ logging.debug("waypoints retrieved")
 for photo in list_photo_names():
 
     # get timestamp from exif data
-    logging.debu("getting timestamp from exif data...")
+    logging.debug("getting timestamp from exif data...")
     ts = get_exif_timestamp(photo, offset=-8)  # -8 for PST
     if ts:
         logging.debug("timestamp retrieved; georeferencing...")
