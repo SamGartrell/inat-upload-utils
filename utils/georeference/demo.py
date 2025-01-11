@@ -4,7 +4,7 @@ import logging
 logging.basicConfig(
     format="%(levelname)s:%(module)s:%(funcName)s:%(lineno)d:%(message)s"
 )
-logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().setLevel("INFO")
 
 gpx_file = "in_gpx/hood_241225.gpx"
 logging.debug(f"GPX file: {gpx_file}\ngetting waypoints...")
