@@ -10,9 +10,9 @@ import logging
 # import oauthlib
 
 # local
-from upload import batch
-from suggest import id
-from georeference import geo
+from utils.upload import batch
+from utils.suggest import id
+from utils.georeference import geo
 
 class InatUtils:
     # region props
@@ -23,11 +23,13 @@ class InatUtils:
         output_dir=None,
         gmt_offset: int = -8,
         token=None,
-        trusted_genera=None,
+        trusted_genera=[],
         log_level=logging.INFO,
     ):
-        self.photos = []
-        self.trusted_genera = []
+        self.in_photos = []
+        self.out_photos = []
+        self.trusted_genera = trusted_genera
+        self.min_score = 60
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
         self.time_range = None
@@ -45,7 +47,7 @@ class InatUtils:
         logging.getLogger().setLevel(self.log_level)
 
         if photo_dir:
-            self.photos = self.load_images(photo_dir=photo_dir)
+            self.in_photos = self.load_images(photo_dir=photo_dir)
 
         if gpx_dir:
             self.georeference(gpx_dir=gpx_dir)
@@ -71,9 +73,11 @@ class InatUtils:
                 self.name, directory=self.folder, offset=self.offset
             )
             self.geo = dict()
-            self.georeferenced = False
+            self.identity = dict()
+            self.georeferenced = False  # meaning in Exif, not in geo property
             self.identified = False
             self.outputs = []
+            self.src = None
 
     # region methods
     def load_images(self, photo_dir) -> list[Image]:
@@ -85,6 +89,7 @@ class InatUtils:
             out_images.append(photo)
         return out_images
 
+    # region geo
     def georeference(self, gpx_dir=None, photo_dir=None, delta_threshold=None):
 
         if not gpx_dir and self.gpx_dir != None:
@@ -106,7 +111,7 @@ class InatUtils:
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
         )
 
-        for p in self.photos:
+        for p in self.in_photos:
             if not p.datetime:
                 logging.debug(f"{p.name} has no timestamp and cannot be georeferenced")
                 continue
@@ -116,7 +121,6 @@ class InatUtils:
                 logging.warning(f"waypoint matching failed for {p.name}")
                 continue
             p.geo = georef
-            p.georeferenced = True
 
             logging.debug(
                 f"waypoint matching succeeded with timedelta {p.geo['delta']}"
@@ -137,22 +141,36 @@ class InatUtils:
                 print("modification complete")
                 print(f"image written to {geo_img[1]}")
 
-                p.outputs.append(InatUtils.Image(geo_img[1], self.offset))
+                output = InatUtils.Image(geo_img[1], self.offset)
+
+                output.georeferenced = True
+                output.geo = p.geo
+                output.src = p.id
+                p.outputs.append(output)
+                p.georeferenced = True
+                self.out_photos.append(output)
             except Exception as e:
                 logging.error(e)
-
-        # TODO: modify exif metadata with p.geo
-
         self.georeferenced_percent = (
-            sum(1 for p in self.photos if p.georeferenced) / len(self.photos)
-            if self.photos
+            sum(1 for p in self.in_photos if p.georeferenced) / len(self.in_photos)
+            if self.in_photos
             else 0.0
         )
 
-    def identify(self, confidence_threshold=75):
-        # Implementation for identifying species in photos
-        pass
+    # region id
+    def identify(
+        self,
+        min_score=None,
+    ):
+        if not min_score:
+            min_score = self.min_score
+        for p in self.in_photos:
+            res = id.get_cv_ids(p.path, token=self._token)
+            identification = id.interpret_results(res, confidence_threshold=min_score)
 
+            p.identity = identification
+
+    # region exports/uploads
     def dump_jpg(self):
         # Implementation for dumping photos as JPG
         pass
@@ -178,3 +196,5 @@ class InatUtils:
 iu = InatUtils(photo_dir="in_photos", gpx_dir="in_gpx")
 
 print()
+
+# %%
