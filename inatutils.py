@@ -88,6 +88,8 @@ class InatUtils:
     def load_images(self, photo_dir) -> list[Image]:
         out_images = []
         for pic in geo.list_photo_names(directory=photo_dir):
+            if pic.startswith("."):
+                continue
             path = os.path.join(os.getcwd(), photo_dir, pic)
             photo = InatUtils.Image(path=path, offset=self.offset)
 
@@ -102,7 +104,9 @@ class InatUtils:
         elif not gpx_dir and not self.gpx_dir:
             logging.error("cannot georeference; no GPX dir was provided")
         gpx_files = [
-            os.path.join(gpx_dir, f) for f in geo.list_gpx_files(directory=gpx_dir)
+            os.path.join(gpx_dir, f)
+            for f in geo.list_gpx_files(directory=gpx_dir)
+            if not f.startswith(".")
         ]
 
         if not gpx_files:
