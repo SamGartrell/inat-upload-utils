@@ -1,11 +1,13 @@
 # %%
 import json
+import PIL.Image
 import requests
 import os
 import sys
 import uuid
 from pprint import pprint
 import logging
+import PIL
 
 # import oauthlib
 
@@ -27,6 +29,7 @@ class InatUtils:
         log_level="INFO",
         min_score: int | float = 75,
         common_ancestor_ok: bool = True,
+        timestamp_fmt: str = "%Y-%m-%d %H:%M:%S",
     ):
         self.in_photos = (
             []
@@ -45,6 +48,7 @@ class InatUtils:
         self.output_dir = output_dir
         self.token = token
         self.offset = gmt_offset
+        self.timestamp_fmt = timestamp_fmt
         self.log_level = log_level
         logging.basicConfig(
             format="%(levelname)s:%(module)s:%(funcName)s:%(lineno)d:%(message)s"
@@ -55,10 +59,7 @@ class InatUtils:
             self.in_photos = self.load_images(photo_dir=photo_dir)
 
         if gpx_dir:
-            self.georeference(gpx_dir=gpx_dir)
-
-            if self.georeferenced_percent:
-                self.bbox = self._get_bbox()
+            self.get_waypoints(gpx_dir=gpx_dir)
 
         if token:
             self.token = token
@@ -66,7 +67,7 @@ class InatUtils:
             self.token = id.refresh_token()
 
     # region image
-    class Image:
+    class Img:
         def __init__(self, path: str, offset: int):
             self.id = str(uuid.uuid4())
             self.name = os.path.split(path)[1]
@@ -83,22 +84,22 @@ class InatUtils:
             self.identified = False
             self.outputs = []
             self.src = None
+            self.raster = PIL.Image.open(self.path)
+            self.exif = self.raster.getexif()
 
     # region methods
-    def load_images(self, photo_dir) -> list[Image]:
+    def load_images(self, photo_dir) -> list[Img]:
         out_images = []
         for pic in geo.list_photo_names(directory=photo_dir):
             if pic.startswith("."):
                 continue
             path = os.path.join(os.getcwd(), photo_dir, pic)
-            photo = InatUtils.Image(path=path, offset=self.offset)
+            photo = InatUtils.Img(path=path, offset=self.offset)
 
             out_images.append(photo)
         return out_images
 
-    # region geo
-    def georeference(self, gpx_dir=None, photo_dir=None, delta_threshold=None):
-
+    def get_waypoints(self, gpx_dir) -> None:
         if not gpx_dir and self.gpx_dir != None:
             gpx_dir = self.gpx_dir
         elif not gpx_dir and not self.gpx_dir:
@@ -120,6 +121,7 @@ class InatUtils:
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
         )
 
+    def georeference(self, photo_dir=None, delta_threshold=None):
         for p in self.in_photos:
             if not p.datetime:
                 logging.debug(f"{p.name} has no timestamp and cannot be georeferenced")
@@ -150,7 +152,7 @@ class InatUtils:
                 print("modification complete")
                 print(f"image written to {geo_img[1]}")
 
-                output = InatUtils.Image(geo_img[1], self.offset)
+                output = InatUtils.Img(geo_img[1], self.offset)
 
                 output.georeferenced = True
                 output.geo = p.geo
