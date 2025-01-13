@@ -12,9 +12,7 @@ import PIL
 # import oauthlib
 
 # local
-from utils.upload import batch
-from utils.suggest import id
-from utils.georeference import geo
+from utils import tools
 
 class InatUtils:
     # region props
@@ -30,17 +28,33 @@ class InatUtils:
         min_score: int | float = 75,
         common_ancestor_ok: bool = True,
         timestamp_fmt: str = "%Y-%m-%d %H:%M:%S",
+        time_delta_threshold=None,
+        camera_make: str = None,
+        camera_model: str = None,
     ):
-        self.in_photos = (
-            []
-        )  # TODO: how should I organize this? in, geo, id, out? store all process data in original pohoto obj as source of truth?
-        self.out_photos = []
+        """
+        Initialize the InatUtils class.
+        Args:
+            photo_dir (str): Directory containing photos to be processed. Default is "in_photos".
+            gpx_dir (str): Directory containing GPX files to georeference with. Default is "in_gpx".
+            output_dir (str): Directory to save processed photos. Default is "out_photos".
+            gmt_offset (int): GMT offset, representing the timezone in which the photos were taken, for timestamp conversion. Default is -8 (LA/Vancouver).
+            token (str, optional): Authentication token for the iNaturalist computer vision service. Default is None.
+            trusted_genera (list): List of trusted genera for identification. Default is an empty list.
+            log_level (str): Logging level. Default is "INFO".
+            min_score (int | float): Minimum score for organism identification. Default is 75.
+            common_ancestor_ok (bool): Decides wether the common ancestor (typically Genus or Family rank) of all low-scoring IDs can be used as an identification, in the absence of a well-scored ID. Default is True.
+            timestamp_fmt (str): Format for photo timestamps. Default is "%Y-%m-%d %H:%M:%S".
+            time_delta_threshold (optional): Threshold for time delta. Default is None.
+        """
+        self.photos = []
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
         self.waypoints = []  # TODO: refactor waypoints to be numpy array
         self.time_range = None
         self.bbox = None
         self.trusted_genera = trusted_genera
+        self.time_delta_threshold = time_delta_threshold
         self.common_ancestor_ok = common_ancestor_ok
         self.min_score = min_score
         self.photo_dir = photo_dir
@@ -48,6 +62,8 @@ class InatUtils:
         self.output_dir = output_dir
         self.token = token
         self.offset = gmt_offset
+        self.camera_make = camera_make
+        self.camera_model = camera_model
         self.timestamp_fmt = timestamp_fmt
         self.log_level = log_level
         logging.basicConfig(
@@ -56,17 +72,18 @@ class InatUtils:
         logging.getLogger().setLevel(self.log_level)
 
         if photo_dir:
-            self.in_photos = self.load_images(photo_dir=photo_dir)
+            self.photos = self.load_images(photo_dir=photo_dir)
 
         if gpx_dir:
             self.get_waypoints(gpx_dir=gpx_dir)
+            self.match_waypoints()
 
         if token:
             self.token = token
         else:
-            self.token = id.refresh_token()
+            self.token = tools.refresh_token()
 
-    # region image
+    # region images
     class Img:
         def __init__(self, path: str, offset: int):
             self.id = str(uuid.uuid4())
@@ -75,7 +92,7 @@ class InatUtils:
             self.path = path
             self.format = os.path.splitext(self.path)[1]
             self.offset = offset
-            self.datetime = geo.get_exif_timestamp(
+            self.datetime = tools.get_exif_timestamp(
                 self.name, directory=self.folder, offset=self.offset
             )
             self.geo = dict()
@@ -87,10 +104,9 @@ class InatUtils:
             self.raster = PIL.Image.open(self.path)
             self.exif = self.raster.getexif()
 
-    # region methods
     def load_images(self, photo_dir) -> list[Img]:
         out_images = []
-        for pic in geo.list_photo_names(directory=photo_dir):
+        for pic in tools.list_photo_names(directory=photo_dir):
             if pic.startswith("."):
                 continue
             path = os.path.join(os.getcwd(), photo_dir, pic)
@@ -99,14 +115,15 @@ class InatUtils:
             out_images.append(photo)
         return out_images
 
+    # region spatial
     def get_waypoints(self, gpx_dir) -> None:
         if not gpx_dir and self.gpx_dir != None:
             gpx_dir = self.gpx_dir
         elif not gpx_dir and not self.gpx_dir:
-            logging.error("cannot georeference; no GPX dir was provided")
+            logging.error("cannot get waypoints; no GPX dir was provided")
         gpx_files = [
             os.path.join(gpx_dir, f)
-            for f in geo.list_gpx_files(directory=gpx_dir)
+            for f in tools.list_gpx_files(directory=gpx_dir)
             if not f.startswith(".")
         ]
 
@@ -115,19 +132,19 @@ class InatUtils:
             return None
 
         for gpx in gpx_files:
-            self.waypoints.extend(geo.parse_gpx(gpx))
+            self.waypoints.extend(tools.parse_gpx(gpx))
 
         logging.debug(
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
         )
 
-    def georeference(self, photo_dir=None, delta_threshold=None):
-        for p in self.in_photos:
+    def match_waypoints(self):
+        for p in self.photos:
             if not p.datetime:
                 logging.debug(f"{p.name} has no timestamp and cannot be georeferenced")
                 continue
-            logging.debug(f"georeferencing {p.name}...")
-            georef = geo.find_closest_waypoint(self.waypoints, p.datetime)
+            logging.debug(f"locating {p.name}...")
+            georef = tools.find_closest_waypoint(self.waypoints, p.datetime)
             if not georef:
                 logging.warning(f"waypoint matching failed for {p.name}")
                 continue
@@ -137,36 +154,70 @@ class InatUtils:
                 f"waypoint matching succeeded with timedelta {p.geo['delta']}"
             )
 
-            if delta_threshold and p.geo["delta"] > delta_threshold:
-                logging.warning(
-                    f"waypoint matching was not within {delta_threshold}-minute time accuracy threshold for {p.name}; skipping EXIF georeferencing"
-                )
-                continue
+            ref = tools.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
+            p.geo["ref"] = ref
 
-            ref = geo.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
-
-            # TODO: split waypoint matching and exif georeferencing into separate functions
-            logging.debug("modifying exif data...")
+    def georeference_image(self, photo: Img | str | int):
+        p = None
+        if isinstance(photo, int):
             try:
-                geo_img = geo.modify_exif_position(p.name, georef, ref)
-                print("modification complete")
-                print(f"image written to {geo_img[1]}")
+                p = self.photos[photo]
+            except Exception as e:
+                print(
+                    f"no photo at index {photo}; check the length of self.photos and try again"
+                )
+        elif isinstance(photo, str):
+            p = next((x for x in self.photos if x.name == photo), None)
+        elif isinstance(photo, InatUtils.Img):
+            p = photo
 
-                output = InatUtils.Img(geo_img[1], self.offset)
+        if not p:
+            logging.error(f"no photo found for input {p}")
+            return
+        exif = p.exif
+        geo = p.geo
+        ref = p.geo["ref"]
 
-                output.georeferenced = True
-                output.geo = p.geo
-                output.src = p.id
-                output.georeferenced = True
-                p.outputs.append(output)
-                p.georeferenced = True
-                self.out_photos.append(output)
+        gps_value = {
+            0: b"\x02\x03\x00\x00",  # GPSVersionID
+            1: ref["lat"],  # GPSLatitudeRef
+            2: tools.get_dms_from_decimal(p.geo["y"]),  # GPSLatitude
+            3: ref["lon"],  # GPSLongitudeRef
+            4: tools.get_dms_from_decimal(p.geo["x"]),  # GPSLongitude
+            5: b"\x00",  # GPSAltitudeRef
+            6: p.geo.get("z", 0.0),  # GPSAltitude
+            9: "A",  # GPSStatus
+            18: "WGS-84\x00",  # GPSMapDatum
+        }
+
+        p.exif[34853] = gps_value
+
+        if self.camera_make:
+            p.exif[271] = self.camera_make
+
+        if self.camera_model:
+            p.exif[272] = self.camera_model
+
+        p.georeferenced = True
+        self.update_georeferenced_percent()
+
+    def update_georeferenced_percent(self):
+        self.georeferenced_percent = (
+            100 * (sum(1 for p in self.photos if p.georeferenced) / len(self.photos))
+            if self.photos
+            else 0.0
+        )
+
+    def georeference(self):
+        for p in self.photos:
+            try:
+                self.georeference_image(p)
             except Exception as e:
                 logging.error(e)
+
         self.georeferenced_percent = (
-            100
-            * (sum(1 for p in self.in_photos if p.georeferenced) / len(self.in_photos))
-            if self.in_photos
+            100 * (sum(1 for p in self.photos if p.georeferenced) / len(self.photos))
+            if self.photos
             else 0.0
         )
 
@@ -177,9 +228,9 @@ class InatUtils:
     ):
         if not min_score:
             min_score = self.min_score
-        for p in self.in_photos:
-            res = id.get_cv_ids(p.path, token=self.token)
-            identification = id.interpret_results(
+        for p in self.photos:
+            res = tools.get_cv_ids(p.path, token=self.token)
+            identification = tools.interpret_results(
                 res,
                 confidence_threshold=min_score,
                 common_ancestor_ok=self.common_ancestor_ok,
@@ -192,17 +243,23 @@ class InatUtils:
                         o.identity = identification
                         o.identified = True
 
+        self.update_identified_percent()
+
+    def update_identified_percent(self):
         self.identified_percent = (
-            100 * sum(1 for p in self.in_photos if p.identified) / len(self.in_photos)
-            if self.in_photos
+            100 * (sum(1 for p in self.photos if p.identified) / len(self.photos))
+            if self.photos
             else 0.0
         )
+
     # region exports/uploads
     def dump_jpg(self):
+        # TODO: implement filters here for time delta, trusted genera, and whatever else
         # Implementation for dumping photos as JPG
         pass
 
     def dump_csv(self):
+        # TODO: implement filters here for time delta, trusted genera, and whatever else
         # Implementation for dumping data to CSV
         pass
 
