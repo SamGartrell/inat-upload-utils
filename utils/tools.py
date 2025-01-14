@@ -9,20 +9,14 @@ import sys
 import os
 import json
 import requests
-import PIL
-import datetime
 import logging
-
-# region modules
-import os
 import xml.etree.ElementTree as ET
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
-import requests
 from datetime import datetime, timezone, timedelta
 import math
 from typing import Tuple
-import logging
+import pandas as pd
 
 
 # endregion modules
@@ -132,10 +126,10 @@ def get_track_timespan(waypoints):
 
 # region spatial
 def parse_gpx(gpx_file):
-    """Parse GPX file and return a list of waypoints with their timestamps."""
+    """Parse a GPX file and return a DataFrame of waypoints."""
     tree = ET.parse(gpx_file)
     root = tree.getroot()
-    # Namespace for GPX file
+    # gpx namespace
     ns = {"default": "http://www.topografix.com/GPX/1/1"}
 
     waypoints = []
@@ -144,13 +138,13 @@ def parse_gpx(gpx_file):
         time = trkpt.find("default:time", ns).text
         timestamp = convert_to_utc(
             time, fmt="%Y-%m-%dT%H:%M:%S%Z"
-        )  # gpx files are in UTC but we still gotta reformat the stamp
+        )  # NOTE: might be :::::: instead...
         lat = float(trkpt.attrib["lat"])
         lon = float(trkpt.attrib["lon"])
         src = os.path.split(gpx_file)[1]
         waypoints.append({"t": timestamp, "x": lon, "y": lat, "geo_src": src})
 
-    return waypoints
+    return pd.DataFrame(waypoints)
 
 
 def truncate(f: float, n: int = 0) -> float:

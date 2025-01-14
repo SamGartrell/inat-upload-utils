@@ -8,6 +8,8 @@ import uuid
 from pprint import pprint
 import logging
 import PIL
+import datetime
+import pandas as pd
 
 # import oauthlib
 
@@ -27,7 +29,7 @@ class InatUtils:
         log_level="INFO",
         min_score: int | float = 75,
         common_ancestor_ok: bool = True,
-        timestamp_fmt: str = "%Y-%m-%d %H:%M:%S",
+        timestamp_fmt: str = "%Y:%m:%d %H:%M:%S",
         time_delta_threshold=None,
         camera_make: str = None,
         camera_model: str = None,
@@ -50,7 +52,7 @@ class InatUtils:
         self.photos = []
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
-        self.waypoints = []  # TODO: refactor waypoints to be numpy array
+        self.waypoints = pd.DataFrame(columns=["x", "y", "z", "t"])
         self.time_range = None
         self.bbox = None
         self.trusted_genera = trusted_genera
@@ -90,6 +92,7 @@ class InatUtils:
             self.name = os.path.split(path)[1]
             self.folder = os.path.split(path)[0]
             self.path = path
+            self.size = os.path.getsize(self.path)
             self.format = os.path.splitext(self.path)[1]
             self.offset = offset
             self.datetime = tools.get_exif_timestamp(
@@ -104,6 +107,10 @@ class InatUtils:
             self.raster = PIL.Image.open(self.path)
             self.exif = self.raster.getexif()
 
+            # if self.datetime and not isinstance(self.datetime, datetime.datetime):
+            #     self.datetime = datetime.datetime(self.datetime)
+            #     # TODO: enforce which format here?
+
     def load_images(self, photo_dir) -> list[Img]:
         out_images = []
         for pic in tools.list_photo_names(directory=photo_dir):
@@ -117,42 +124,76 @@ class InatUtils:
 
     # region spatial
     def get_waypoints(self, gpx_dir) -> None:
+        """gets waypoints from GPX files in a directory and adds them to the waypoints dataframe.
+        NOTE: timestamps are in utc
+        """
         if not gpx_dir and self.gpx_dir != None:
             gpx_dir = self.gpx_dir
         elif not gpx_dir and not self.gpx_dir:
-            logging.error("cannot get waypoints; no GPX dir was provided")
-        gpx_files = [
-            os.path.join(gpx_dir, f)
-            for f in tools.list_gpx_files(directory=gpx_dir)
-            if not f.startswith(".")
-        ]
+            logging.error("cannot georeference; no GPX dir was provided")
+            return
 
+        gpx_files = [
+            os.path.join(gpx_dir, f) for f in tools.list_gpx_files(directory=gpx_dir)
+        ]
         if not gpx_files:
             logging.warning(f"no gpx files found in {gpx_dir}")
-            return None
+            return
 
         for gpx in gpx_files:
-            self.waypoints.extend(tools.parse_gpx(gpx))
+            if ".gitignore" in gpx:
+                continue
+            waypoints = tools.parse_gpx(gpx)
+            self.waypoints = pd.concat(
+                [self.waypoints, pd.DataFrame(waypoints)], ignore_index=True
+            )
 
         logging.debug(
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
         )
 
     def match_waypoints(self):
+        start = datetime.datetime.now()
+        logging.debug("creating photos df...")
+        photosdf = pd.DataFrame(
+            [p.__dict__ for p in self.photos]
+        )  # refactor entire self.photos if this doesn't improve performance, but it will
+        logging.debug("converting timestamps...")
+        photosdf["datetime_obj"] = pd.to_datetime(
+            photosdf["datetime"], format=self.timestamp_fmt
+        )
+        self.waypoints["t_obj"] = pd.to_datetime(
+            self.waypoints["t"], format=self.timestamp_fmt
+        )
+        logging.debug("merging waypoints with photos...")
+        nearest_waypoints = pd.merge_asof(
+            photosdf.sort_values("datetime_obj"),
+            self.waypoints.sort_values("t_obj"),
+            left_on="datetime_obj",
+            right_on="t_obj",
+            direction="nearest",
+        )
+        logging.debug("calculating time delta...")
+        nearest_waypoints["delta"] = (
+            nearest_waypoints["datetime_obj"] - nearest_waypoints["t_obj"]
+        ).abs().dt.total_seconds() / 60
+
+        logging.debug(
+            "pd stuff done in",
+            str(datetime.datetime.now() - start),
+            "seconds",
+        )
+
         for p in self.photos:
             if not p.datetime:
                 logging.debug(f"{p.name} has no timestamp and cannot be georeferenced")
                 continue
             logging.debug(f"locating {p.name}...")
-            georef = tools.find_closest_waypoint(self.waypoints, p.datetime)
-            if not georef:
-                logging.warning(f"waypoint matching failed for {p.name}")
-                continue
-            p.geo = georef
 
-            logging.debug(
-                f"waypoint matching succeeded with timedelta {p.geo['delta']}"
-            )
+            closest_waypoint = nearest_waypoints.loc[
+                nearest_waypoints["id"] == p.id
+            ].iloc[0]
+            p.geo = closest_waypoint[["x", "y", "z", "t", "geo_src"]].to_dict()
 
             ref = tools.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
             p.geo["ref"] = ref
