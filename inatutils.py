@@ -79,6 +79,10 @@ class InatUtils:
         if gpx_dir:
             self.get_waypoints(gpx_dir=gpx_dir)
             self.match_waypoints()
+            self.georeference()
+
+        if self.photos:
+            self.sort()
 
         if token:
             self.token = token
@@ -122,6 +126,15 @@ class InatUtils:
             out_images.append(photo)
         return out_images
 
+    def sort(
+        self,
+        by: str = "datetime_obj",
+    ) -> None:
+        photosdf = self.photos_df()
+        sorted = photosdf.sort_values(by=by, ascending=True)
+        self.photos = list(sorted["img_obj"])
+        return self.photos
+
     # region spatial
     def get_waypoints(self, gpx_dir) -> None:
         """gets waypoints from GPX files in a directory and adds them to the waypoints dataframe.
@@ -152,20 +165,21 @@ class InatUtils:
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
         )
 
+    def photos_df(self, get_ts_obj=True, keep_img_obj=True) -> pd.DataFrame:
+        pdf = pd.DataFrame([p.__dict__ for p in self.photos])
+        if get_ts_obj:
+            pdf["datetime_obj"] = pd.to_datetime(
+                pdf["datetime"], format=self.timestamp_fmt
+            )
+        if keep_img_obj:
+            pdf["img_obj"] = pdf["id"].map({p.id: p for p in self.photos})
+        return pdf
+
     def match_waypoints(self):
-        start = datetime.datetime.now()
-        logging.debug("creating photos df...")
-        photosdf = pd.DataFrame(
-            [p.__dict__ for p in self.photos]
-        )  # refactor entire self.photos if this doesn't improve performance, but it will
-        logging.debug("converting timestamps...")
-        photosdf["datetime_obj"] = pd.to_datetime(
-            photosdf["datetime"], format=self.timestamp_fmt
-        )
+        photosdf = self.photos_df()
         self.waypoints["t_obj"] = pd.to_datetime(
             self.waypoints["t"], format=self.timestamp_fmt
         )
-        logging.debug("merging waypoints with photos...")
         nearest_waypoints = pd.merge_asof(
             photosdf.sort_values("datetime_obj"),
             self.waypoints.sort_values("t_obj"),
@@ -173,16 +187,9 @@ class InatUtils:
             right_on="t_obj",
             direction="nearest",
         )
-        logging.debug("calculating time delta...")
         nearest_waypoints["delta"] = (
             nearest_waypoints["datetime_obj"] - nearest_waypoints["t_obj"]
         ).abs().dt.total_seconds() / 60
-
-        logging.debug(
-            "pd stuff done in",
-            str(datetime.datetime.now() - start),
-            "seconds",
-        )
 
         for p in self.photos:
             if not p.datetime:
