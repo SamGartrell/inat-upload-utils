@@ -10,6 +10,7 @@ import logging
 import PIL
 import datetime
 import pandas as pd
+import numpy as np
 
 # import oauthlib
 
@@ -27,7 +28,7 @@ class InatUtils:
         token: str = None,
         trusted_genera: list = [],
         log_level="INFO",
-        min_score: int | float = 75,
+        min_score: int | float = 70,
         common_ancestor_ok: bool = True,
         timestamp_fmt: str = "%Y:%m:%d %H:%M:%S",
         time_delta_threshold=None,
@@ -205,6 +206,12 @@ class InatUtils:
             ref = tools.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
             p.geo["ref"] = ref
 
+            for k, v in p.geo.items():
+                if isinstance(v, datetime.datetime):
+                    p.geo[k] = v.strftime(self.timestamp_fmt)
+                elif pd.isna(v):
+                    p.geo[k] = 0
+
     def georeference_image(self, photo: Img | str | int):
         p = None
         if isinstance(photo, int):
@@ -229,9 +236,9 @@ class InatUtils:
         gps_value = {
             0: b"\x02\x03\x00\x00",  # GPSVersionID
             1: ref["lat"],  # GPSLatitudeRef
-            2: tools.get_dms_from_decimal(p.geo["y"]),  # GPSLatitude
+            2: tools.get_dms_from_decimal(abs(p.geo["y"])),  # GPSLatitude
             3: ref["lon"],  # GPSLongitudeRef
-            4: tools.get_dms_from_decimal(p.geo["x"]),  # GPSLongitude
+            4: tools.get_dms_from_decimal(abs(p.geo["x"])),  # GPSLongitude
             5: b"\x00",  # GPSAltitudeRef
             6: p.geo.get("z", 0.0),  # GPSAltitude
             9: "A",  # GPSStatus
@@ -270,6 +277,54 @@ class InatUtils:
         )
 
     # region id
+
+    def identify_image(self, photo: Img | str | int, min_score=None):
+        if not min_score:
+            min_score = self.min_score
+        if isinstance(photo, int):
+            try:
+                p = self.photos[photo]
+            except Exception as e:
+                logging.error(
+                    f"no photo at index {photo}; check the length of self.photos and try again"
+                )
+        elif isinstance(photo, str):
+            p = next((x for x in self.photos if x.name == photo), None)
+            if not p:
+                logging.error(f"no photo found for input {photo}")
+                return
+        elif isinstance(photo, InatUtils.Img):
+            p = photo
+
+        if isinstance(p, InatUtils.Img):
+            try:
+                res = tools.get_cv_ids(p.path, token=self.token)
+                identification = tools.interpret_results(
+                    res,
+                    confidence_threshold=min_score,
+                    common_ancestor_ok=self.common_ancestor_ok,
+                )
+                if identification:
+                    p.identity = identification
+                    p.identified = True
+                    if p.outputs:  # if has child images, they're also IDd now
+                        for o in p.outputs:
+                            o.identity = identification
+                            o.identified = True
+
+                self.update_identified_percent()
+            except Exception as e:
+                logging.error(e)
+        else:
+            logging.error(f"photo yielded {p} which is type {type(p)}, not type Img")
+
+    def update_identified_percent(self):
+        self.identified_percent = (
+            100 * (sum(1 for p in self.photos if p.identified) / len(self.photos))
+            if self.photos
+            else 0.0
+        )
+
     def identify(
         self,
         min_score=None,
@@ -277,21 +332,25 @@ class InatUtils:
         if not min_score:
             min_score = self.min_score
         for p in self.photos:
-            res = tools.get_cv_ids(p.path, token=self.token)
-            identification = tools.interpret_results(
-                res,
-                confidence_threshold=min_score,
-                common_ancestor_ok=self.common_ancestor_ok,
-            )
-            if identification:
-                p.identity = identification
-                p.identified = True
-                if p.outputs:  # if has child images, they're also IDd now
-                    for o in p.outputs:
-                        o.identity = identification
-                        o.identified = True
+            try:
+                res = tools.get_cv_ids(p.path, token=self.token)
+                identification = tools.interpret_results(
+                    res,
+                    confidence_threshold=min_score,
+                    common_ancestor_ok=self.common_ancestor_ok,
+                )
+                if identification:
+                    p.identity = identification
+                    p.identified = True
+                    if p.outputs:  # if has child images, they're also IDd now
+                        for o in p.outputs:
+                            o.identity = identification
+                            o.identified = True
 
-        self.update_identified_percent()
+                self.update_identified_percent()
+            except Exception as e:
+                logging.error(e)
+            self.update_identified_percent()
 
     def update_identified_percent(self):
         self.identified_percent = (
@@ -301,10 +360,83 @@ class InatUtils:
         )
 
     # region exports/uploads
-    def dump_jpg(self):
-        # TODO: implement filters here for time delta, trusted genera, and whatever else
-        # Implementation for dumping photos as JPG
-        pass
+    def save(
+        self,
+        indices: int | list = None,
+        # title: str = None,
+        filter: str = None,
+        output_dir: str = None,
+        out_fmt: str = "JPEG",
+        max_timedelta: int = 5,
+        # overwrite: bool = True,
+        # max_time: str|datetime.datetime = None,
+        # min_time: str|datetime.datetime = None,
+        # bounds: tuple = None,
+    ):
+        exports = []
+        if not output_dir:
+            output_dir = self.output_dir
+        if indices:
+            indices = [indices] if isinstance(indices, int) else indices
+            try:
+                for i in indices:
+                    photo = self.photos[i]
+                    exports.append(photo)
+            except Exception as e:
+                logging.error(e)
+        if filter:
+            if filter == "georeferenced":
+                exports = [p for p in self.photos if p.georeferenced]
+            elif filter == "identified":
+                exports = [p for p in self.photos if p.identified]
+            elif filter == "unidentified":
+                exports = [p for p in self.photos if not p.identified]
+            elif filter == "ungeoreferenced":
+                exports = [p for p in self.photos if not p.georeferenced]
+            else:
+                logging.error(f"filter {filter} not recognized")
+        elif not filter and indices == None and not exports:
+            exports = self.photos
+
+        if max_timedelta:
+            exports = [
+                p
+                for p in exports
+                if p.geo.get("delta", False) and p.geo.get("delta") < max_timedelta
+            ]
+        logging.info(f"exporting {len(exports)} photos to {output_dir}")
+
+        for p in exports:
+            try:
+                outname = p.name
+                if not out_fmt:
+                    out_fmt = p.format
+
+                if p.geo["t"]:
+                    outname = f"{p.geo['t']}_"
+
+                if p.identified:
+                    if p.identity["rank"] == "species":
+                        outname += f"{p.identity['name']}"
+                    else:
+                        outname += f"{p.identity['rank']}_{p.identity['name']}"
+
+                if p.georeferenced:
+                    outname += "_geo"
+
+                if p.format:
+                    outname += p.format
+
+                p.raster.save(
+                    os.path.join(output_dir, outname), format=out_fmt, exif=p.exif
+                )
+                res = InatUtils.Img(
+                    path=os.path.join(output_dir, outname), offset=p.offset
+                )
+                res.src = p.id
+                p.outputs.append(res)
+            except Exception as e:
+                logging.error(e)
 
     def dump_csv(self):
         # TODO: implement filters here for time delta, trusted genera, and whatever else

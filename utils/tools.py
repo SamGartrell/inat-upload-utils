@@ -426,7 +426,7 @@ def modify_exif_position(
 
 
 def refresh_token(
-    manual_token="eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjo4ODA4MjMzLCJleHAiOjE3MzY2NjE5NDF9.X2_XcDe5fyzPbfF6e93jsT_jZzERZJqV1ppldR8Nga8pL1TwCIZYiaXQJeVLFGXEdSvhntfgCVqZ9xtSoR_7Ig",
+    manual_token="eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjo4ODA4MjMzLCJleHAiOjE3MzY5ODIwNTV9.rbSainOfo1QDin5iY_2tu9zeQu-2TScC_WAvB4Y8MzN-IEC3BrbXABMtjD1ynMAiO4rJ77_bdWFtz09RaS10kw",
 ):
     logging.info(f"getting token...")
     # TODO: need an oauth app setup, request one here: https://www.inaturalist.org/oauth/app_owner_application
