@@ -38,7 +38,7 @@ conda activate inat-img-utils
 ```
 Most of the logic for the `InatUtils` class methods originated from the standalone functions in the `legacy/` directory. I recommend using and developing against the class implementation for better organization and performance.
 
-Please create issues and/or pull requests (I like feature branches referencing issues in comments/prs) as you see fit, and feel free to reach out with any questions or collaboration requests!
+Please create issues and/or pull requests as you see fit, and feel free to reach out with any questions or collaboration requests!
 
 ## External Resources
 - [exiftool](https://exiftool.org/)
