@@ -10,7 +10,11 @@ This repository contains tools to assist iNaturalist users with georeferencing p
 ## Usage
 For example use cases, check out the [`examples notebook`](https://github.com/SamGartrell/inat-upload-utils/blob/main/examples.ipynb), or the `demo.py` file for each of the modules in [`legacy/`](https://github.com/SamGartrell/inat-upload-utils/tree/main/legacy).
 
-The general workflow for this platform is to record a GPX track with a mobile app like [Strava](https://www.strava.com) or [Avenza](https://store.avenza.com/pages/app-features) while you're out taking timestamped pictures on your digital camera. When ready to upload your photos, 
+### Try it yourself!
+For example use cases, check out the [`examples notebook`](https://github.com/SamGartrell/inat-upload-utils/blob/main/examples.ipynb), or the `demo.py` file for each of the modules in [`utils/`](https://github.com/SamGartrell/inat-upload-utils/tree/main/utils).
+
+### Workflow
+The general workflow for this tool is to record a GPX track with a mobile app like [Strava](https://www.strava.com) or [Avenza](https://store.avenza.com/pages/app-features) while you're out taking timestamped pictures on your digital camera. When ready to upload your photos, 
 - put the GPX track in [`in_gpx/`]() 
 - put the photos (JPG, CR2, and HEIC formats tested) in [`in_photos/`]()
 - run `inatutils.py` to create an `InatUtils` instance, or run `legacy/geo/demo.py`
