@@ -8,15 +8,11 @@ import os
 print("importing")
 s = datetime.datetime.now()
 iu = InatUtils()
-pic = iu.photos[0]
-iu.georeference()
 
-print(f"everything loaded, georeferenced in {datetime.datetime.now() - s}")
-print(
-    f"{len(iu.photos)} photos ({sum([os.path.getsize(p.path) for p in iu.photos]) / 1024 / 1024:.2f} MB total)"
-)
-print(f"{len(iu.waypoints)} waypoints")
-os.path.getsize(iu.photos[0].path)
+iu.sort()
 
+for p in iu.photos:
+    # iu.identify_image(p)
+    iu.save(p)
 print()
 # %%
