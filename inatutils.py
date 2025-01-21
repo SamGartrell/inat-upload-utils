@@ -53,7 +53,7 @@ class InatUtils:
         self.photos = []
         self.georeferenced_percent = 0.0
         self.identified_percent = 0.0
-        self.waypoints = pd.DataFrame(columns=["x", "y", "z", "t"])
+        self.waypoints = pd.DataFrame(columns=["x", "y", "z", "t", "geo_src"])
         self.time_range = None
         self.bbox = None
         self.trusted_genera = trusted_genera
@@ -61,13 +61,16 @@ class InatUtils:
         self.common_ancestor_ok = common_ancestor_ok
         self.min_score = min_score
         self.photo_dir = photo_dir
+        self.photo_dir_valid = False
         self.gpx_dir = gpx_dir
+        self.gpx_dir_valid = False
         self.output_dir = output_dir
         self.token = token
         self.offset = gmt_offset
         self.camera_make = camera_make
         self.camera_model = camera_model
         self.timestamp_fmt = timestamp_fmt
+        self.photo_formats = ["jpg", "cr2", "jpeg", "heic"]
         self.log_level = log_level
         logging.basicConfig(
             format="%(levelname)s:%(module)s:%(funcName)s:%(lineno)d:%(message)s"
@@ -75,9 +78,11 @@ class InatUtils:
         logging.getLogger().setLevel(self.log_level)
 
         if photo_dir:
+            self.photo_dir_valid = self.validate_contents(photo_dir, self.photo_formats)
             self.photos = self.load_images(photo_dir=photo_dir)
 
         if gpx_dir:
+            self.gpx_dir_valid = self.validate_contents(gpx_dir, ["gpx"])
             self.get_waypoints(gpx_dir=gpx_dir)
             self.match_waypoints()
             self.georeference()
@@ -91,6 +96,27 @@ class InatUtils:
             self.token = tools.refresh_token()
 
     # region images
+    def validate_contents(self, dir: str, expected_files: list[str]):
+        expected_file_present = False
+        expected_files.append(".gitignore")
+        expected_files = [ef.lower().strip(".") for ef in expected_files]
+
+        try:
+            contents = os.listdir(dir)
+
+            if contents:
+                for file in contents:
+                    file_ext = file.lower().split(".")[-1]
+                    if not file_ext in expected_files:
+                        logging.warning(f"unexpected file type in {dir}: {file}")
+                    elif file_ext != "gitignore":
+                        expected_file_present = True
+
+        except Exception as e:
+            logging.error(e)
+
+        return expected_file_present
+
     class Img:
         def __init__(self, path: str, offset: int):
             self.id = str(uuid.uuid4())
@@ -116,13 +142,26 @@ class InatUtils:
             #     self.datetime = datetime.datetime(self.datetime)
             #     # TODO: enforce which format here?
 
-    def load_images(self, photo_dir) -> list[Img]:
+    def load_images(self, photo_dir, overwrite=False) -> list[Img]:
+        if len(self.photos) > 0 and not overwrite:
+            logging.warning(
+                f"aborting load images; images have already been loaded. If you want to overwrite existing images, use this function with overwrite=True."
+            )
+            return
+        if not os.path.exists(photo_dir):
+            logging.error(f"specified photo dir doesn't exist: {photo_dir}")
+            return
+        if not self.validate_contents(photo_dir, self.photo_formats):
+            logging.error(f"no photos found in specified photo dir {photo_dir}")
+            return
+
         out_images = []
+
         for pic in tools.list_photo_names(directory=photo_dir):
             if pic.startswith("."):
                 continue
             path = os.path.join(os.getcwd(), photo_dir, pic)
-            photo = InatUtils.Img(path=path, offset=self.offset)
+            photo = self.Img(path=path, offset=self.offset)
 
             out_images.append(photo)
         return out_images
@@ -147,6 +186,12 @@ class InatUtils:
             logging.error("cannot georeference; no GPX dir was provided")
             return
 
+        if not self.validate_contents(gpx_dir, ["gpx"]):
+            logging.error(
+                f"cannot georeference; no valid GPX files present in GPX dir {gpx_dir}"
+            )
+            return
+
         gpx_files = [
             os.path.join(gpx_dir, f) for f in tools.list_gpx_files(directory=gpx_dir)
         ]
@@ -167,6 +212,9 @@ class InatUtils:
         )
 
     def photos_df(self, get_ts_obj=True, keep_img_obj=True) -> pd.DataFrame:
+        if len(self.photos) == 0:
+            logging.error(f"no photos loaded")
+            return pd.DataFrame()
         pdf = pd.DataFrame([p.__dict__ for p in self.photos])
         if get_ts_obj:
             pdf["datetime_obj"] = pd.to_datetime(
@@ -177,6 +225,17 @@ class InatUtils:
         return pdf
 
     def match_waypoints(self):
+        photosdf = self.photos_df()
+        if self.waypoints.empty:
+            logging.warning(
+                f"no photos will be georeferenced because there are no waypoints."
+            )
+            return
+        elif photosdf.empty:
+            logging.warning(
+                f"there are no photos to georeference! Load some with InatUtils.load_images()."
+            )
+            return
         photosdf = self.photos_df()
         self.waypoints["t_obj"] = pd.to_datetime(
             self.waypoints["t"], format=self.timestamp_fmt
@@ -223,37 +282,41 @@ class InatUtils:
                 )
         elif isinstance(photo, str):
             p = next((x for x in self.photos if x.name == photo), None)
-        elif isinstance(photo, InatUtils.Img):
+        elif isinstance(photo, self.Img):
             p = photo
 
         if not p:
             logging.error(f"no photo found for input {p}")
             return
-        exif = p.exif
-        geo = p.geo
-        ref = p.geo["ref"]
+        try:
+            exif = p.exif
+            geo = p.geo
+            ref = p.geo.get("ref", None)
+        except Exception as e:
+            logging.error(e)
 
-        gps_value = {
-            0: b"\x02\x03\x00\x00",  # GPSVersionID
-            1: ref["lat"],  # GPSLatitudeRef
-            2: tools.get_dms_from_decimal(abs(p.geo["y"])),  # GPSLatitude
-            3: ref["lon"],  # GPSLongitudeRef
-            4: tools.get_dms_from_decimal(abs(p.geo["x"])),  # GPSLongitude
-            5: b"\x00",  # GPSAltitudeRef
-            6: p.geo.get("z", 0.0),  # GPSAltitude
-            9: "A",  # GPSStatus
-            18: "WGS-84\x00",  # GPSMapDatum
-        }
+        if exif and geo and ref:
+            gps_value = {
+                0: b"\x02\x03\x00\x00",  # GPSVersionID
+                1: ref["lat"],  # GPSLatitudeRef
+                2: tools.get_dms_from_decimal(abs(p.geo["y"])),  # GPSLatitude
+                3: ref["lon"],  # GPSLongitudeRef
+                4: tools.get_dms_from_decimal(abs(p.geo["x"])),  # GPSLongitude
+                5: b"\x00",  # GPSAltitudeRef
+                6: p.geo.get("z", 0.0),  # GPSAltitude
+                9: "A",  # GPSStatus
+                18: "WGS-84\x00",  # GPSMapDatum
+            }
 
-        p.exif[34853] = gps_value
+            p.exif[34853] = gps_value
 
-        if self.camera_make:
-            p.exif[271] = self.camera_make
+            if self.camera_make:
+                p.exif[271] = self.camera_make
 
-        if self.camera_model:
-            p.exif[272] = self.camera_model
+            if self.camera_model:
+                p.exif[272] = self.camera_model
 
-        p.georeferenced = True
+            p.georeferenced = True
         self.update_georeferenced_percent()
 
     def update_georeferenced_percent(self):
@@ -278,7 +341,7 @@ class InatUtils:
 
     # region id
 
-    def identify_image(self, photo: Img | str | int, min_score=None):
+    def identify_image(self, photo: Img | str | int, min_score=None, overwrite=None):
         if not min_score:
             min_score = self.min_score
         if isinstance(photo, int):
@@ -293,11 +356,15 @@ class InatUtils:
             if not p:
                 logging.error(f"no photo found for input {photo}")
                 return
-        elif isinstance(photo, InatUtils.Img):
+        elif isinstance(photo, self.Img):
             p = photo
 
-        if isinstance(p, InatUtils.Img):
+        if isinstance(p, self.Img):
             try:
+                if p.identified and not overwrite:
+                    logging.warning(
+                        f"image {p.name} is already identified; use this function with overwrite=True to overwrite existing ID"
+                    )
                 res = tools.get_cv_ids(p.path, token=self.token)
                 identification = tools.interpret_results(
                     res,
@@ -325,14 +392,14 @@ class InatUtils:
             else 0.0
         )
 
-    def identify(
-        self,
-        min_score=None,
-    ):
+    def identify(self, min_score=None, overwrite=True):
         if not min_score:
             min_score = self.min_score
         for p in self.photos:
             try:
+                if p.identified and not overwrite:
+                    logging.debug(f"skipping {p.name} because already identified")
+                    continue
                 res = tools.get_cv_ids(p.path, token=self.token)
                 identification = tools.interpret_results(
                     res,
@@ -362,7 +429,7 @@ class InatUtils:
     # region exports/uploads
     def save(
         self,
-        indices: int | list = None,
+        outdata: Img | int | list = None,
         # title: str = None,
         filter: str = None,
         output_dir: str = None,
@@ -376,14 +443,23 @@ class InatUtils:
         exports = []
         if not output_dir:
             output_dir = self.output_dir
-        if indices:
-            indices = [indices] if isinstance(indices, int) else indices
-            try:
-                for i in indices:
-                    photo = self.photos[i]
-                    exports.append(photo)
-            except Exception as e:
-                logging.error(e)
+
+        if isinstance(outdata, list):
+            for i in outdata:
+                if isinstance(i, int):
+                    exports.append(self.photos[i])
+                elif isinstance(i, self.Img):
+                    exports.append(i)
+
+        elif isinstance(outdata, self.Img):
+            exports.append(outdata)
+        elif isinstance(outdata, int):
+            exports.append(self.photos[outdata])
+        else:
+            logging.error(
+                f"expected outdata as Int, Img, or List, got {type(outdata)}; skipping"
+            )
+            return
         if filter:
             if filter == "georeferenced":
                 exports = [p for p in self.photos if p.georeferenced]
@@ -395,7 +471,7 @@ class InatUtils:
                 exports = [p for p in self.photos if not p.georeferenced]
             else:
                 logging.error(f"filter {filter} not recognized")
-        elif not filter and indices == None and not exports:
+        elif not filter and outdata == None and not exports:
             exports = self.photos
 
         if max_timedelta:
@@ -430,9 +506,7 @@ class InatUtils:
                 p.raster.save(
                     os.path.join(output_dir, outname), format=out_fmt, exif=p.exif
                 )
-                res = InatUtils.Img(
-                    path=os.path.join(output_dir, outname), offset=p.offset
-                )
+                res = self.Img(path=os.path.join(output_dir, outname), offset=p.offset)
                 res.src = p.id
                 p.outputs.append(res)
             except Exception as e:

@@ -13,6 +13,6 @@ iu.sort()
 
 for p in iu.photos:
     # iu.identify_image(p)
-    iu.save(indices=iu.photos.index(p))
+    iu.save(p)
 print()
 # %%
