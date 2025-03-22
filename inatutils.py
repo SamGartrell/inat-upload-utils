@@ -25,7 +25,7 @@ class InatUtils:
         gpx_dir: str = "in_gpx",
         output_dir: str = "out_photos",
         gmt_offset: int = -8,
-        token: str = None,
+        token: str = "eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjo4ODA4MjMzLCJleHAiOjE3Mzg2MDY1MTF9.cb9_iyrGhuaUk89BwcB6xmf73qeqIRUMVBrEXrSxMx6vaF7gU7jYS2fmQXZwXrP5XUPJgpKYOXEhdwovnNyyvQ",
         trusted_genera: list = [],
         log_level="INFO",
         min_score: int | float = 70,
@@ -142,6 +142,11 @@ class InatUtils:
             #     self.datetime = datetime.datetime(self.datetime)
             #     # TODO: enforce which format here?
 
+        def show(self, size: tuple[int] = None):
+            if size:
+                self.raster.thumbnail(size)
+            self.raster.show()
+
     def load_images(self, photo_dir, overwrite=False) -> list[Img]:
         if len(self.photos) > 0 and not overwrite:
             logging.warning(
@@ -159,6 +164,9 @@ class InatUtils:
 
         for pic in tools.list_photo_names(directory=photo_dir):
             if pic.startswith("."):
+                continue
+            if not pic.lower().endswith(tuple(self.photo_formats)):
+                logging.warning(f"skipping {pic} due to unexpected file type")
                 continue
             path = os.path.join(os.getcwd(), photo_dir, pic)
             photo = self.Img(path=path, offset=self.offset)
@@ -193,7 +201,9 @@ class InatUtils:
             return
 
         gpx_files = [
-            os.path.join(gpx_dir, f) for f in tools.list_gpx_files(directory=gpx_dir)
+            os.path.join(gpx_dir, f)
+            for f in tools.list_gpx_files(directory=gpx_dir)
+            if f != ".gitignore"
         ]
         if not gpx_files:
             logging.warning(f"no gpx files found in {gpx_dir}")
@@ -260,7 +270,7 @@ class InatUtils:
             closest_waypoint = nearest_waypoints.loc[
                 nearest_waypoints["id"] == p.id
             ].iloc[0]
-            p.geo = closest_waypoint[["x", "y", "z", "t", "geo_src"]].to_dict()
+            p.geo = closest_waypoint[["x", "y", "z", "t", "geo_src", "delta"]].to_dict()
 
             ref = tools.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
             p.geo["ref"] = ref
@@ -393,6 +403,7 @@ class InatUtils:
         )
 
     def identify(self, min_score=None, overwrite=True):
+        prior_identification = None
         if not min_score:
             min_score = self.min_score
         for p in self.photos:
@@ -413,10 +424,16 @@ class InatUtils:
                         for o in p.outputs:
                             o.identity = identification
                             o.identified = True
-
-                self.update_identified_percent()
+                elif identification == 0 and prior_identification == 0:
+                    logging.warning("token appears to have expired--aborting.")
+                    break
+                prior_identification = identification
             except Exception as e:
                 logging.error(e)
+                self.update_identified_percent()
+                break
+
+            # todo: get and implement AppID here to automatically refresh token
             self.update_identified_percent()
 
     def update_identified_percent(self):
@@ -435,6 +452,7 @@ class InatUtils:
         output_dir: str = None,
         out_fmt: str = "JPEG",
         max_timedelta: int = 5,
+        min_timedelta: int = 0,
         # overwrite: bool = True,
         # max_time: str|datetime.datetime = None,
         # min_time: str|datetime.datetime = None,
@@ -455,6 +473,8 @@ class InatUtils:
             exports.append(outdata)
         elif isinstance(outdata, int):
             exports.append(self.photos[outdata])
+        elif not outdata:
+            exports = self.photos
         else:
             logging.error(
                 f"expected outdata as Int, Img, or List, got {type(outdata)}; skipping"
@@ -478,30 +498,31 @@ class InatUtils:
             exports = [
                 p
                 for p in exports
-                if p.geo.get("delta", False) and p.geo.get("delta") < max_timedelta
+                if p.geo.get("delta", True) and p.geo.get("delta") < max_timedelta
             ]
         logging.info(f"exporting {len(exports)} photos to {output_dir}")
 
         for p in exports:
             try:
-                outname = p.name
+                # outname = p.name.strip(p.name[p.name.index(".") :])
+                outname = ""
                 if not out_fmt:
                     out_fmt = p.format
 
                 if p.geo["t"]:
-                    outname = f"{p.geo['t']}_"
+                    outname += f"{p.geo['t']}".replace(" ", "-").replace(":", "")
 
                 if p.identified:
                     if p.identity["rank"] == "species":
-                        outname += f"{p.identity['name']}"
+                        outname += f"_{p.identity['name']}"
                     else:
-                        outname += f"{p.identity['rank']}_{p.identity['name']}"
+                        outname += f"_{p.identity['rank']}_{p.identity['name']}"
 
                 if p.georeferenced:
                     outname += "_geo"
 
                 if p.format:
-                    outname += p.format
+                    outname += f".{out_fmt}"
 
                 p.raster.save(
                     os.path.join(output_dir, outname), format=out_fmt, exif=p.exif
