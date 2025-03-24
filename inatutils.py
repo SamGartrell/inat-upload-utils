@@ -520,7 +520,7 @@ class InatUtils:
             )
             try:
                 # outname = p.name.strip(p.name[p.name.index(".") :])
-                outname = f"{p.id}"[:3]
+                outname = ""
                 if not out_fmt:
                     out_fmt = p.format
 
@@ -538,6 +538,12 @@ class InatUtils:
 
                 if p.format:
                     outname += f".{out_fmt}"
+
+                if outname in os.listdir(output_dir):
+                    logging.debug(
+                        f"file {outname} already exists in output directory; appending unique ID to filename"
+                    )
+                    outname += f"_{p.id[:2]}"
 
                 p.raster.save(
                     os.path.join(output_dir, outname), format=out_fmt, exif=p.exif
