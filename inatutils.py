@@ -213,8 +213,9 @@ class InatUtils:
             if ".gitignore" in gpx:
                 continue
             waypoints = tools.parse_gpx(gpx)
+            filtered_waypoints = pd.DataFrame(waypoints).dropna(how="all")
             self.waypoints = pd.concat(
-                [self.waypoints, pd.DataFrame(waypoints)], ignore_index=True
+                [self.waypoints, filtered_waypoints], ignore_index=True
             )
 
         logging.debug(
@@ -287,7 +288,7 @@ class InatUtils:
             try:
                 p = self.photos[photo]
             except Exception as e:
-                print(
+                logging.error(
                     f"no photo at index {photo}; check the length of self.photos and try again"
                 )
         elif isinstance(photo, str):
@@ -451,8 +452,7 @@ class InatUtils:
         filter: str = None,
         output_dir: str = None,
         out_fmt: str = "JPEG",
-        max_timedelta: int = 5,
-        min_timedelta: int = 0,
+        max_timedelta: int = 5000,
         # overwrite: bool = True,
         # max_time: str|datetime.datetime = None,
         # min_time: str|datetime.datetime = None,
@@ -495,6 +495,18 @@ class InatUtils:
             exports = self.photos
 
         if max_timedelta:
+            logging.debug(f"filtering {len(exports)} exports by max timedelta")
+            logging.debug(
+                "mean timedelta: ", np.mean([p.geo.get("delta", 0) for p in exports])
+            )
+
+            logging.debug(
+                "min timedelta: ", np.min([p.geo.get("delta", 0) for p in exports])
+            )
+
+            logging.debug(
+                "max timedelta: ", np.max([p.geo.get("delta", 0) for p in exports])
+            )
             exports = [
                 p
                 for p in exports
@@ -503,14 +515,17 @@ class InatUtils:
         logging.info(f"exporting {len(exports)} photos to {output_dir}")
 
         for p in exports:
+            logging.info(
+                f"   {exports.index(p)/len(exports):.2%} exported. Current file: {p.name}"
+            )
             try:
                 # outname = p.name.strip(p.name[p.name.index(".") :])
-                outname = ""
+                outname = f"{p.id}"[:3]
                 if not out_fmt:
                     out_fmt = p.format
 
-                if p.geo["t"]:
-                    outname += f"{p.geo['t']}".replace(" ", "-").replace(":", "")
+                if p.datetime:
+                    outname += f"_{p.datetime.replace(':', '').replace(' ', '_')}"[2:]
 
                 if p.identified:
                     if p.identity["rank"] == "species":

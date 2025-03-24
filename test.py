@@ -1,18 +1,23 @@
 # %%
 from inatutils import InatUtils
-import pandas as pd
-import datetime
-import os
 
-# iu = InatUtils(log_level="DEBUG")
 print("importing")
-s = datetime.datetime.now()
 iu = InatUtils()
 
-iu.sort()
 
+# iu.sort()
+
+print("iu initialized and sorted")
+
+# print("id ing")
+# iu.identify()
+
+# print("id done")
 for p in iu.photos:
-    # iu.identify_image(p)
-    iu.save(p)
-print()
+    if not p.identified:
+        p.name = p.id
+iu.output_dir = "C:/Users/SamGartrell/Desktop/inat"
+print(iu.photos[235].__dict__)
+print("saving")
+iu.save()
 # %%
