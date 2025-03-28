@@ -118,6 +118,29 @@ class InatUtils:
         return expected_file_present
 
     class Img:
+        """
+        an inat utils image.
+        all of these properties can be accessed and modified directly.
+        `self.id`: uuid4
+        `self.name`: name of the file it was loaded from
+        `self.folder`: name of the folder it was loaded from
+        `self.path`: path it was loaded from
+        `self.size`: bytes
+        `self.format`: file extension it was loaded from
+        `self.offset`: GMT offset to apply to datetime (inherits from InatUtils)
+        `self.datetime`: the photo's timestamp
+        `self.geo`: a dict of spatiotemporal data (including nearest timestamp that could be matched)
+        `self.timedelta`: the difference in minutes between actual photo time and matched waypoint time
+        `self.identity`: ID from computer vision model
+        `self.georeferenced`: boolean indicating whether the image has been georeferenced
+        `self.identified`: boolean indicating whether the image has been identified
+        `self.outputs`: a list of child images (e.g. exports) yielded from parent
+        `self.src`: i don't remember why i added this
+        `self.raster`: the PIL image object
+        `self.exif`: the PIL image object's exif data--direct editing strongly discouraged; use self.raster.getexif() instead
+
+        `show()`: displays the image
+        """
         def __init__(self, path: str, offset: int):
             self.id = str(uuid.uuid4())
             self.name = os.path.split(path)[1]
@@ -130,6 +153,7 @@ class InatUtils:
                 self.name, directory=self.folder, offset=self.offset
             )
             self.geo = dict()
+            self.timedelta = None
             self.identity = dict()
             self.georeferenced = False  # meaning in Exif, not in geo property
             self.identified = False
@@ -174,12 +198,9 @@ class InatUtils:
             out_images.append(photo)
         return out_images
 
-    def sort(
-        self,
-        by: str = "datetime_obj",
-    ) -> None:
+    def sort(self, by: str = "datetime_obj", ascending: bool = True) -> list[Img]:
         photosdf = self.photos_df()
-        sorted = photosdf.sort_values(by=by, ascending=True)
+        sorted = photosdf.sort_values(by=by, ascending=ascending)
         self.photos = list(sorted["img_obj"])
         return self.photos
 
@@ -213,10 +234,10 @@ class InatUtils:
             if ".gitignore" in gpx:
                 continue
             waypoints = tools.parse_gpx(gpx)
-            filtered_waypoints = pd.DataFrame(waypoints).dropna(how="all")
-            self.waypoints = pd.concat(
-                [self.waypoints, filtered_waypoints], ignore_index=True
-            )
+            if len(waypoints) and len(waypoints) != len(self.waypoints):
+                self.waypoints = pd.concat(
+                    [self.waypoints, waypoints], ignore_index=True
+                )
 
         logging.debug(
             f"{len(self.waypoints)} waypoints created from {len(gpx_files)} gpx files"
@@ -272,6 +293,7 @@ class InatUtils:
                 nearest_waypoints["id"] == p.id
             ].iloc[0]
             p.geo = closest_waypoint[["x", "y", "z", "t", "geo_src", "delta"]].to_dict()
+            p.timedelta = p.geo["delta"]
 
             ref = tools.get_reference_direction(lat=p.geo["y"], lon=p.geo["x"])
             p.geo["ref"] = ref
@@ -453,6 +475,7 @@ class InatUtils:
         output_dir: str = None,
         out_fmt: str = "JPEG",
         max_timedelta: int = 5000,
+        recycle_names: bool = False,
         # overwrite: bool = True,
         # max_time: str|datetime.datetime = None,
         # min_time: str|datetime.datetime = None,
@@ -515,35 +538,48 @@ class InatUtils:
         logging.info(f"exporting {len(exports)} photos to {output_dir}")
 
         for p in exports:
-            logging.info(
-                f"   {exports.index(p)/len(exports):.2%} exported. Current file: {p.name}"
+            logging.debug(
+                f"""   {exports.index(p)/len(exports):.2%} exported.
+                photo time:   {p.datetime}
+                iu tz:        {self.offset}
+                matched time: {p.geo['t']}
+                delta:        {p.geo['delta']}
+                x:            {p.geo['x']}
+                y:            {p.geo['y']}
+                name:         {p.name}
+                """
             )
             try:
                 # outname = p.name.strip(p.name[p.name.index(".") :])
-                outname = ""
-                if not out_fmt:
-                    out_fmt = p.format
+                if recycle_names:
+                    outname = p.name
+                else:
+                    outname = ""
+                    if not out_fmt:
+                        out_fmt = p.format
 
-                if p.datetime:
-                    outname += f"_{p.datetime.replace(':', '').replace(' ', '_')}"[2:]
+                    if p.datetime:
+                        outname += f"_{p.datetime.replace(':', '').replace(' ', '_')}"[
+                            2:
+                        ]
 
-                if p.identified:
-                    if p.identity["rank"] == "species":
-                        outname += f"_{p.identity['name']}"
-                    else:
-                        outname += f"_{p.identity['rank']}_{p.identity['name']}"
+                    if p.identified:
+                        if p.identity["rank"] == "species":
+                            outname += f"_{p.identity['name']}"
+                        else:
+                            outname += f"_{p.identity['rank']}_{p.identity['name']}"
 
-                if p.georeferenced:
-                    outname += "_geo"
+                    if p.georeferenced:
+                        outname += "_geo"
 
-                if p.format:
-                    outname += f".{out_fmt}"
+                    if outname in os.listdir(output_dir):
+                        logging.debug(
+                            f"file {outname} already exists in output directory; appending unique ID to filename"
+                        )
+                        outname += f"_{p.id[:2]}"
 
-                if outname in os.listdir(output_dir):
-                    logging.debug(
-                        f"file {outname} already exists in output directory; appending unique ID to filename"
-                    )
-                    outname += f"_{p.id[:2]}"
+                    if p.format:
+                        outname += f".{out_fmt}"
 
                 p.raster.save(
                     os.path.join(output_dir, outname), format=out_fmt, exif=p.exif
