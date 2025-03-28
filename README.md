@@ -10,7 +10,11 @@ This repository contains tools to assist iNaturalist users with georeferencing p
 ## Usage
 For example use cases, check out the [`examples notebook`](https://github.com/SamGartrell/inat-upload-utils/blob/main/examples.ipynb), or the `demo.py` file for each of the modules in [`legacy/`](https://github.com/SamGartrell/inat-upload-utils/tree/main/legacy).
 
-The general workflow for this platform is to record a GPX track with a mobile app like [Strava](https://www.strava.com) or [Avenza](https://store.avenza.com/pages/app-features) while you're out taking timestamped pictures on your digital camera. When ready to upload your photos, 
+### Try it yourself!
+For example use cases, check out the [`examples notebook`](https://github.com/SamGartrell/inat-upload-utils/blob/main/examples.ipynb), or the `demo.py` file for each of the modules in [`utils/`](https://github.com/SamGartrell/inat-upload-utils/tree/main/utils).
+
+### Workflow
+The general workflow for this tool is to record a GPX track with a mobile app like [Strava](https://www.strava.com) or [Avenza](https://store.avenza.com/pages/app-features) while you're out taking timestamped pictures on your digital camera. When ready to upload your photos, 
 - put the GPX track in [`in_gpx/`]() 
 - put the photos (JPG, CR2, and HEIC formats tested) in [`in_photos/`]()
 - run `inatutils.py` to create an `InatUtils` instance, or run `legacy/geo/demo.py`
@@ -34,7 +38,7 @@ conda activate inat-img-utils
 ```
 Most of the logic for the `InatUtils` class methods originated from the standalone functions in the `legacy/` directory. I recommend using and developing against the class implementation for better organization and performance.
 
-Please create issues and/or pull requests (I like feature branches referencing issues in comments/prs) as you see fit, and feel free to reach out with any questions or collaboration requests!
+Please create issues and/or pull requests as you see fit, and feel free to reach out with any questions or collaboration requests!
 
 ## External Resources
 - [exiftool](https://exiftool.org/)
