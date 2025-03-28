@@ -517,5 +517,5 @@ def interpret_results(
                 logging.warning(f"no common ancestor available; ID failed")
                 return None
     # else,
-    logging.error(f"ID request failed\n\nres:\n\n{res}")
-    return None
+    logging.error(f"ID request failed res: {res}")
+    return 0
