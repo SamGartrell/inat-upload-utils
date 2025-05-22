@@ -1,4 +1,4 @@
-# 🐛 iNaturalist Upload Utilities 🍄
+#  iNaturalist Upload Utilities
 Sam Gartrell || iNat profile: [mothpith](https://www.inaturalist.org/observations?place_id=any&user_id=mothpith&verifiable=any) || Email: [gartrell.sam.s@gmail.com](mailto:gartrell.sam.s@gmail.com)
 
 This repository contains tools to assist iNaturalist users with georeferencing photos from digital cameras, and provides preliminary ID using the iNaturalist computer vision model. 
